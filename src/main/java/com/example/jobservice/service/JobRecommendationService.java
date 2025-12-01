@@ -1,12 +1,13 @@
 package com.example.jobservice.service;
 
 import com.example.jobservice.cv.client.CvClient;
-import com.example.jobservice.cv.DTO.*;
+import com.example.jobservice.cv.DTO.CvDto;
 import com.example.jobservice.job.repository.JobRepository;
 import com.example.jobservice.model.Job;
 import feign.FeignException;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 
@@ -26,16 +27,11 @@ public class JobRecommendationService {
         System.out.println("[DEBUG] Calling NestJS CV service for userId: " + userId);
 
         CvDto cv;
-
         try {
-            // 🔥 Feign call to NestJS: GET http://localhost:3000/cv/user/{userId}
             cv = cvClient.getCvByUserId(userId);
         } catch (FeignException.NotFound e) {
-            // NestJS replied 404: no CV for this user
             System.out.println("[DEBUG] No CV found in NestJS for userId: " + userId);
-            // 👉 choose behavior: empty list or all jobs
             return Collections.emptyList();
-            // or: return jobRepository.findAll();
         }
 
         if (cv == null) {
@@ -45,18 +41,34 @@ public class JobRecommendationService {
 
         System.out.println("[DEBUG] CV found for userId " + userId + " with headline: " + cv.getHeadline());
 
-        // Simple recommendation: match job title with CV headline
         String headline = cv.getHeadline();
+        List<Job> jobs;
+
         if (headline == null || headline.isBlank()) {
-            System.out.println("[DEBUG] No headline in CV -> returning all jobs.");
-            return jobRepository.findAll();
+            System.out.println("[DEBUG] No headline in CV -> using all jobs.");
+            jobs = jobRepository.findAll();
+        } else {
+            jobs = jobRepository.findByTitleContainingIgnoreCase(headline);
         }
 
-        List<Job> jobs =
-                jobRepository.findByTitleContainingIgnoreCase(headline);
+        // 🔎 filter only valid jobs based on dates
+        LocalDate today = LocalDate.now();
+        List<Job> validJobs = jobs.stream()
+                .filter(job -> isJobValid(job, today))
+                .toList();
 
-        System.out.println("[DEBUG] Recommended jobs found: " + jobs.size());
+        System.out.println("[DEBUG] Recommended valid jobs found: " + validJobs.size());
 
-        return jobs;
+        return validJobs;
+    }
+
+    private boolean isJobValid(Job job, LocalDate today) {
+        LocalDate start = job.getDateDebut();
+        LocalDate end   = job.getDateExpired();
+
+        boolean notBeforeStart = (start == null || !start.isAfter(today));   // start <= today
+        boolean notAfterEnd    = (end == null   || !end.isBefore(today));    // end >= today
+
+        return notBeforeStart && notAfterEnd;
     }
 }
