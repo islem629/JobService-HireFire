@@ -3,6 +3,8 @@ package com.example.jobservice.service;
 import com.example.jobservice.cv.DTO.CvDto;
 import com.example.jobservice.cv.client.CvClient;
 import feign.FeignException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
@@ -16,10 +18,7 @@ public class CvService {
         this.cvClient = cvClient;
     }
 
-    /**
-     * Get CV by userId from cv-service.
-     * Returns Optional.empty() if no CV exists (404 from cv-service).
-     */
+    @CircuitBreaker(name = "cvServiceCB", fallbackMethod = "getCvFallback")
     public Optional<CvDto> getCvByUserId(Long userId) {
         try {
             CvDto cv = cvClient.getCvByUserId(userId);
@@ -28,5 +27,14 @@ public class CvService {
             // cv-service returned 404 → user has no CV
             return Optional.empty();
         }
+    }
+    // Executed when circuit is OPEN or service fails
+    public Optional<CvDto> getCvFallback(Long userId, Exception ex) {
+        if (ex instanceof CallNotPermittedException) {
+            System.out.println("[CB] cvServiceCB is OPEN -> call not permitted");
+        } else {
+            System.out.println("[CB] cvServiceCB fallback due to: " + ex.getClass().getSimpleName() + " - " + ex.getMessage());
+        }
+        return Optional.empty();
     }
 }
